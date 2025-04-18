@@ -1,0 +1,123 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: flask-mysql-template
+  annotations:
+    description: "Template for deploying a Python Flask app with MySQL backend"
+objects:
+
+  # Persistent volume for MySQL
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: mysql-pvc
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 1Gi
+
+  # MySQL database DeploymentConfig
+  - apiVersion: apps.openshift.io/v1
+    kind: DeploymentConfig
+    metadata:
+      name: mysql
+    spec:
+      replicas: 1
+      selector: {app: mysql}
+      strategy: {type: Recreate}
+      template:
+        metadata:
+          labels: {app: mysql}
+        spec:
+          containers:
+            - name: mysql
+              image: mysql:5.7
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  value: ${DB_PASSWORD}
+                - name: MYSQL_DATABASE
+                  value: ${DB_NAME}
+              ports: [{containerPort: 3306}]
+              volumeMounts:
+                - name: mysql-data
+                  mountPath: /var/lib/mysql
+          volumes:
+            - name: mysql-data
+              persistentVolumeClaim:
+                claimName: mysql-pvc
+
+  # MySQL service
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: mysql
+    spec:
+      ports: [{port: 3306}]
+      selector: {app: mysql}
+
+  # Flask app DeploymentConfig
+  - apiVersion: apps.openshift.io/v1
+    kind: DeploymentConfig
+    metadata:
+      name: flask-app
+    spec:
+      replicas: 1
+      selector: {app: flask-app}
+      template:
+        metadata:
+          labels: {app: flask-app}
+        spec:
+          containers:
+            - name: flask-app
+              image: ${APP_IMAGE}
+              ports: [{containerPort: 5001}]
+              env:
+                - name: DB_HOST
+                  value: mysql
+                - name: DB_USER
+                  value: root
+                - name: DB_PASSWORD
+                  value: ${DB_PASSWORD}
+                - name: DB_NAME
+                  value: ${DB_NAME}
+
+  # Flask app Service
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: flask-app
+    spec:
+      ports:
+        - port: 80
+          targetPort: 5001
+      selector:
+        app: flask-app
+
+  # Route to expose Flask app
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: flask-app
+    spec:
+      to:
+        kind: Service
+        name: flask-app
+      port:
+        targetPort: 5001
+
+parameters:
+  - name: APP_IMAGE
+    description: Image for the Flask application
+    required: true
+    value: yourusername/flask-app:latest
+
+  - name: DB_PASSWORD
+    description: Password for MySQL root user
+    required: true
+    value: root
+
+  - name: DB_NAME
+    description: Database name
+    required: true
+    value: flask_db
